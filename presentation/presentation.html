@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Review Analyst — презентация</title>
+<style>
+  :root {
+    --acc: #4F46E5;
+    --acc2: #7C3AED;
+    --ink: #171C2B;
+    --muted: #6B7280;
+    --bg: #F4F6FB;
+    --white: #FFFFFF;
+    --neg: #E74C3C;
+    --neu: #F1C40F;
+    --pos: #2ECC71;
+    --line: #E5E8F0;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; background: #0d1017; overflow: hidden; font-family: "Segoe UI", system-ui, sans-serif; }
+  #stage {
+    position: absolute; top: 50%; left: 50%;
+    width: 1280px; height: 720px;
+    transform-origin: center center;
+  }
+  .slide {
+    position: absolute; inset: 0;
+    width: 1280px; height: 720px;
+    background: var(--bg);
+    display: none;
+    overflow: hidden;
+  }
+  .slide.active { display: block; }
+
+  /* header band (slides 2-5) */
+  .header {
+    position: absolute; top: 0; left: 0; right: 0; height: 110px;
+    background: var(--acc);
+    display: flex; align-items: center;
+    padding: 0 58px;
+  }
+  .header h1 { color: var(--white); font-size: 30px; font-weight: 700; }
+  .subtitle {
+    position: absolute; top: 120px; left: 58px; right: 58px;
+    color: var(--muted); font-size: 15px;
+  }
+  .body { position: absolute; top: 175px; left: 58px; right: 58px; bottom: 30px; }
+
+  /* slide 1 */
+  .s1 { background: var(--white); }
+  .s1 .band { position: absolute; top: 0; left: 0; right: 0; height: 249px; background: var(--acc); }
+  .s1 .title { position: absolute; top: 53px; left: 67px; color: var(--white); font-size: 44px; font-weight: 700; }
+  .s1 .tagline { position: absolute; top: 149px; left: 67px; right: 67px; color: var(--white); font-size: 20px; }
+  .s1 .content { position: absolute; top: 288px; left: 67px; right: 67px; }
+  .s1 .footer { position: absolute; bottom: 27px; left: 67px; color: var(--muted); font-size: 13px; }
+
+  .h-sec { color: var(--acc); font-size: 22px; font-weight: 700; margin: 18px 0 10px; }
+  .h-sec:first-child { margin-top: 0; }
+  .p { font-size: 17px; line-height: 1.45; color: var(--ink); }
+  .p .neg { color: var(--neg); font-weight: 700; }
+  .p .acc2 { color: var(--acc2); font-weight: 700; }
+
+  /* stat cards */
+  .cards { display: flex; gap: 15px; margin-bottom: 34px; }
+  .card {
+    flex: 1; background: var(--white); border: 1px solid var(--line); border-radius: 10px;
+    padding: 16px 10px 14px; text-align: center;
+  }
+  .card .val { font-size: 30px; font-weight: 700; }
+  .card .lab { font-size: 13px; color: var(--muted); margin-top: 6px; }
+
+  .obs { font-size: 16px; line-height: 1.9; color: var(--ink); }
+
+  /* pipeline */
+  .pipeline {
+    background: var(--white); border: 1px solid var(--line); border-radius: 10px;
+    padding: 18px 20px; font-size: 16px; font-weight: 700; color: var(--ink);
+    text-align: center; margin-bottom: 22px;
+  }
+  table.metrics { width: 100%; border-collapse: collapse; }
+  table.metrics td {
+    padding: 10px 14px; font-size: 15px; color: var(--ink);
+    border-bottom: 1px solid var(--line);
+  }
+  table.metrics tr:nth-child(odd) td { background: var(--white); }
+  table.metrics tr:nth-child(even) td { background: #FBFBFE; }
+  table.metrics td.num { text-align: center; width: 120px; }
+  table.metrics tr.best td { background: #EEF0FF; color: var(--acc); font-weight: 700; }
+  table.metrics tr.best { outline: 1.5px solid var(--acc); outline-offset: -1.5px; }
+  .concl { margin-top: 20px; font-size: 15px; line-height: 1.5; color: var(--ink); }
+  .concl b.lead { color: var(--acc); }
+
+  /* slide 4 */
+  .demo-wrap { position: absolute; inset: 0; }
+  .demo-wrap img.shot-ui { position: absolute; left: 48px; top: 163px; height: 518px; border-radius: 8px; box-shadow: 0 4px 18px rgba(23,28,43,.18); }
+  .demo-wrap img.shot-demo { position: absolute; left: 442px; top: 149px; height: 547px; border-radius: 8px; box-shadow: 0 4px 18px rgba(23,28,43,.18); }
+  .howto { position: absolute; left: 864px; top: 182px; width: 374px; }
+  .howto h2 { color: var(--acc); font-size: 18px; font-weight: 700; margin-bottom: 14px; }
+  .howto p { font-size: 14px; line-height: 1.5; color: var(--ink); margin-bottom: 12px; }
+
+  /* slide 5 */
+  .s5 .body { top: 160px; }
+  .s5 .h-sec { font-size: 20px; margin: 16px 0 8px; }
+  .s5 .h-sec:first-child { margin-top: 0; }
+  .s5 .obs { font-size: 16px; line-height: 1.75; }
+
+  /* nav */
+  #hud {
+    position: fixed; bottom: 14px; right: 18px; z-index: 10;
+    color: rgba(255,255,255,.55); font-size: 13px; font-family: "Segoe UI", sans-serif;
+    user-select: none;
+  }
+  #hud .hint { opacity: .6; margin-left: 10px; }
+</style>
+</head>
+<body>
+<div id="stage">
+
+  <!-- Slide 1: Название и проблема -->
+  <section class="slide s1 active">
+    <div class="band"></div>
+    <div class="title">Review Analyst</div>
+    <div class="tagline">Гибридный проект ML + AI: анализ тональности отзывов</div>
+    <div class="content">
+      <div class="h-sec">Проблема</div>
+      <p class="p">Бизнес получает тысячи отзывов, но не может быстро понять, <span class="neg">что именно не так</span> и что делать.</p>
+      <div class="h-sec">Решение</div>
+      <p class="p">Мультиязычная ML-модель (EN/RU/KZ) классифицирует каждый отзыв (негатив / нейтрал / позитив), а <span class="acc2">LLM превращает негатив в готовый бизнес-отчёт</span> с конкретными рекомендациями.</p>
+    </div>
+    <div class="footer">Data Science &amp; AI · Итоговый проект · 2026</div>
+  </section>
+
+  <!-- Slide 2: Данные -->
+  <section class="slide">
+    <div class="header"><h1>Данные</h1></div>
+    <div class="subtitle">Yelp (EN) + rureviews / MultiLingualSentiment (RU) + Kazakh reviews (KZ) · 3 класса</div>
+    <div class="body">
+      <div class="cards">
+        <div class="card"><div class="val" style="color:var(--acc)">30 859</div><div class="lab">отзывов (train)</div></div>
+        <div class="card"><div class="val" style="color:var(--acc2)">3</div><div class="lab">языка: EN · RU · KZ</div></div>
+        <div class="card"><div class="val" style="color:var(--pos)">3</div><div class="lab">класса (баланс)</div></div>
+        <div class="card"><div class="val" style="color:var(--muted)">4 250</div><div class="lab">отзывов (test)</div></div>
+      </div>
+      <div class="h-sec">Ключевые наблюдения</div>
+      <div class="obs">
+        •&nbsp; EN: 1–2★ → негатив, 3★ → нейтрал, 4–5★ → позитив; классы сбалансированы<br>
+        •&nbsp; RU: 90k товарных отзывов (rureviews) + общедоменные (рестораны/организации)<br>
+        •&nbsp; KZ: только 1 250 открытых отзывов (развлечения) — большие датасеты gated<br>
+        •&nbsp; RU test — только общедоменные отзывы: это реальный сценарий приложения
+      </div>
+    </div>
+  </section>
+
+  <!-- Slide 3: Подход и модели -->
+  <section class="slide">
+    <div class="header"><h1>Подход и модели</h1></div>
+    <div class="subtitle">Классические модели (EN) → мультиязычный трансформер (рабочая модель)</div>
+    <div class="body">
+      <div class="pipeline">Текст&nbsp; → &nbsp;DistilBERT multilingual (fine-tuned, sentiment-база)&nbsp; → &nbsp;вероятности по 3 классам&nbsp; → &nbsp;LLM-отчёт</div>
+      <table class="metrics">
+        <tr><td><b>Модель</b></td><td class="num"><b>F1 macro</b></td><td class="num"><b>ROC AUC</b></td></tr>
+        <tr><td>Naive Bayes (униграммы, baseline, EN)</td><td class="num">0.661</td><td class="num">0.843</td></tr>
+        <tr><td>XGBoost (биграммы, GPU, EN)</td><td class="num">0.706</td><td class="num">0.872</td></tr>
+        <tr><td>Logistic Regression (биграммы, EN)</td><td class="num">0.735</td><td class="num">0.891</td></tr>
+        <tr><td>LinearSVC (биграммы, calibrated, EN)</td><td class="num">0.744</td><td class="num">0.894</td></tr>
+        <tr class="best"><td>DistilBERT multilingual (fine-tuned, EN/RU/KZ)</td><td class="num">0.764</td><td class="num">0.906</td></tr>
+      </table>
+      <p class="concl"><b class="lead">Вывод:</b> TF-IDF-модели не понимают RU/KZ (~40% — случайный уровень), поэтому рабочая модель — <b>fine-tuned трансформер: RU F1 0.814, overall 0.764.</b></p>
+    </div>
+  </section>
+
+  <!-- Slide 4: Демо -->
+  <section class="slide">
+    <div class="header"><h1>Демо</h1></div>
+    <div class="subtitle">FastAPI + веб-интерфейс · загрузка файла → ML → LLM-отчёт</div>
+    <div class="demo-wrap">
+      <img class="shot-ui" src="../screenshots/ui.png" alt="Интерфейс">
+      <img class="shot-demo" src="../screenshots/demo.png" alt="Демо-отчёт">
+      <div class="howto">
+        <h2>Как это работает</h2>
+        <p>1.&nbsp; Пользователь вставляет отзывы или перетаскивает файл (.txt/.csv/.jsonl/.json)</p>
+        <p>2.&nbsp; ML-модель классифицирует каждый отзыв и даёт вероятности</p>
+        <p>3.&nbsp; LLM читает негатив и пишет отчёт: жалобы + рекомендации</p>
+        <p>4.&nbsp; Всё рендерится в браузере (Markdown)</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Slide 5: Выводы и что дальше -->
+  <section class="slide s5">
+    <div class="header"><h1>Выводы и что дальше</h1></div>
+    <div class="body">
+      <div class="h-sec">Что получилось</div>
+      <div class="obs">
+        •&nbsp; Рабочая модель: fine-tuned мультиязычный DistilBERT — F1 0.764 overall, RU 0.814<br>
+        •&nbsp; Гибридный продукт: ML-классификация (EN/RU/KZ) + LLM-отчёт на русском<br>
+        •&nbsp; Веб-интерфейс: файлы, ручной ввод, генерация примера через LLM
+      </div>
+      <div class="h-sec">Что было сложно</div>
+      <div class="obs">
+        •&nbsp; Обычный MLM-трансформер схлопывал всё в «нейтрал» — спасла sentiment-база + её голова<br>
+        •&nbsp; LLM — thinking-модель: без отключения «размышлений» content приходит пустым<br>
+        •&nbsp; KZ: открытых бизнес-отзывов нет — только 1 250 (развлечения), метрики завышены
+      </div>
+      <div class="h-sec">Что улучшил бы при большем времени</div>
+      <div class="obs">
+        •&nbsp; Больше KZ-данных (бизнес-домен) и более крупная модель для нюансов (ирония, отрицание)<br>
+        •&nbsp; RAG: LLM ссылалась бы на базу знаний о заведении
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<div id="hud"><span id="counter">1 / 5</span><span class="hint">← → для навигации</span></div>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  const counter = document.getElementById('counter');
+  let cur = 0;
+  function show(i) {
+    cur = Math.max(0, Math.min(slides.length - 1, i));
+    slides.forEach((s, j) => s.classList.toggle('active', j === cur));
+    counter.textContent = (cur + 1) + ' / ' + slides.length;
+  }
+  function fit() {
+    const scale = Math.min(window.innerWidth / 1280, window.innerHeight / 720);
+    document.getElementById('stage').style.transform =
+      'translate(-50%, -50%) scale(' + scale + ')';
+  }
+  window.addEventListener('resize', fit);
+  fit();
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') show(cur + 1);
+    else if (e.key === 'ArrowLeft' || e.key === 'PageUp') show(cur - 1);
+    else if (e.key === 'Home') show(0);
+    else if (e.key === 'End') show(slides.length - 1);
+  });
+  document.addEventListener('click', (e) => {
+    if (e.clientX > window.innerWidth / 2) show(cur + 1); else show(cur - 1);
+  });
+</script>
+</body>
+</html>
