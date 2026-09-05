@@ -6,5 +6,6 @@ catboost_info/
 data/raw/*.csv
 data/processed/*
 !data/processed/.gitkeep
-server.log
+server.log*
 server_err.log
+model/multilingual/checkpoint-*/

@@ -1,0 +1,48 @@
+{
+  "labels": [
+    "positive",
+    "neutral",
+    "negative"
+  ],
+  "metrics": {
+    "en": {
+      "n": 2000,
+      "accuracy": 0.682,
+      "f1_macro": 0.6845,
+      "f1_per_class": [
+        0.7351,
+        0.5882,
+        0.7303
+      ],
+      "roc_auc_macro": 0.8507
+    },
+    "ru": {
+      "n": 2000,
+      "accuracy": 0.814,
+      "f1_macro": 0.8141,
+      "f1_per_class": [
+        0.8891,
+        0.762,
+        0.7914
+      ],
+      "roc_auc_macro": 0.9336
+    },
+    "kz": {
+      "n": 250,
+      "accuracy": 1.0,
+      "f1_macro": 1.0,
+      "f1_per_class": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "roc_auc_macro": 1.0
+    },
+    "overall": {
+      "n": 4250,
+      "accuracy": 0.7628,
+      "f1_macro": 0.7638,
+      "roc_auc_macro": 0.9062
+    }
+  }
+}

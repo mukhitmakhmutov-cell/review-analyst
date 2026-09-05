@@ -1,26 +1,75 @@
 """Review Analyst — FastAPI app.
 
-ML part: 3-class sentiment (negative/neutral/positive) with the best pipeline
-(LinearSVC + TF-IDF bigram). AI part: an LLM (Qwen 27B via an OpenAI-compatible
-API) turns the negative reviews into a business report.
+ML part: 3-class sentiment (negative/neutral/positive) with a fine-tuned
+multilingual DistilBERT (EN/RU/KZ). AI part: an LLM (Qwen 27B via an
+OpenAI-compatible API) turns the negative reviews into a business report.
 
 Run:  uvicorn app:app --reload --port 8000
 """
 import os
 from pathlib import Path
 
-import joblib
+import torch
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from openai import OpenAI
 from pydantic import BaseModel, Field
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 
-MODEL_PATH = BASE_DIR / "model" / "best_pipeline.pkl"
+MODEL_DIR = BASE_DIR / "model" / "multilingual"
 LLM_MODEL = os.environ.get("LLM_MODEL", "unknown")
+
+# Fixed class order — matches the base model's head order
+# (0=positive, 1=neutral, 2=negative).
+CLASSES = ["positive", "neutral", "negative"]
+
+
+class MultilingualSentiment:
+    """Sklearn-like wrapper over a fine-tuned multilingual DistilBERT.
+
+    Exposes ``predict`` / ``predict_proba`` / ``classes_`` so the rest of the
+    app treats it exactly like the old LinearSVC pipeline, but it now
+    understands English, Russian and Kazakh.
+    """
+
+    def __init__(self, model_dir: Path, max_length: int = 128, batch_size: int = 32):
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.max_length = max_length
+        self.batch_size = batch_size
+        self.tokenizer = AutoTokenizer.from_pretrained(str(model_dir))
+        self.model = AutoModelForSequenceClassification.from_pretrained(str(model_dir))
+        self.model.to(self.device)
+        self.model.eval()
+
+    @property
+    def classes_(self):
+        return list(CLASSES)
+
+    def _proba(self, texts):
+        """Return an (n, 3) numpy array of class probabilities."""
+        chunks = []
+        with torch.no_grad():
+            for i in range(0, len(texts), self.batch_size):
+                batch = texts[i:i + self.batch_size]
+                enc = self.tokenizer(
+                    batch, truncation=True, max_length=self.max_length,
+                    padding=True, return_tensors="pt",
+                ).to(self.device)
+                logits = self.model(**enc).logits
+                chunks.append(torch.softmax(logits, dim=-1).cpu())
+        return torch.cat(chunks, dim=0).numpy()
+
+    def predict_proba(self, texts):
+        return self._proba(texts).tolist()
+
+    def predict(self, texts):
+        proba = self._proba(texts)
+        return [CLASSES[int(i)] for i in proba.argmax(axis=-1)]
+
 
 app = FastAPI(title="Review Analyst", version="1.0.0")
 
@@ -30,11 +79,13 @@ llm_client = None
 
 @app.on_event("startup")
 def _load():
-    """Load the trained ML pipeline and the LLM client once at startup."""
+    """Load the fine-tuned multilingual model and the LLM client at startup."""
     global model, llm_client
-    if not MODEL_PATH.exists():
-        raise RuntimeError(f"Model not found at {MODEL_PATH}. Run notebooks/analysis.ipynb first.")
-    model = joblib.load(MODEL_PATH)
+    if not MODEL_DIR.exists():
+        raise RuntimeError(
+            f"Model not found at {MODEL_DIR}. Run scripts/finetune_multilingual.py first."
+        )
+    model = MultilingualSentiment(MODEL_DIR)
     llm_client = OpenAI(base_url=os.environ["LLM_API_BASE"], api_key=os.environ["LLM_API_KEY"])
 
 
@@ -75,6 +126,42 @@ def _llm_report(negative_reviews: list[str], max_reviews: int = 15) -> str:
     return resp.choices[0].message.content
 
 
+@app.post("/generate-example")
+def generate_example():
+    """Generate a fresh batch of sample reviews via the LLM for a quick demo.
+
+    Reviews come in three languages (Kazakh, Russian, English). The Kazakh
+    reviews are about entertainment (movies/series/music) because the open
+    Kazakh sentiment data used to train the model is entertainment-domain;
+    Russian and English reviews are about businesses. The prompt is written in
+    Russian with explicit Kazakh vocabulary — a plain English "write in Kazakh"
+    instruction makes the LLM silently fall back to Russian.
+    """
+    prompt = (
+        "Напиши 12 отзывов клиентов, по одному в строке, без нумерации, без кавычек, "
+        "без меток языков, без пояснений.\n"
+        "Первые 4 — СТРОГО на казахском языке (қазақ тілінде), о кино, сериалах, музыке "
+        "и концертах (развлечения). Используй казахские слова (мысалы: фильм, серия, ән, "
+        "концерт, актер, сюжет, дыбыс, көрермен), НЕ на русском.\n"
+        "Следующие 4 — на русском, о ресторанах, салонах и магазинах (услуги).\n"
+        "Последние 4 — на английском, о ресторанах, салонах и магазинах.\n"
+        "Смесь тональности: 4 негативных, 4 нейтральных, 4 позитивных, распределённых по языкам.\n"
+        "Каждый отзыв 2-3 предложения, конкретный (персонал, еда/контент, цены, ожидание, чистота)."
+    )
+    resp = llm_client.chat.completions.create(
+        model=LLM_MODEL,
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=1600,
+        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+    )
+    text = resp.choices[0].message.content.strip()
+    reviews = [ln.strip(" \t-•*") for ln in text.splitlines()]
+    reviews = [r for r in reviews if r]
+    if not reviews:
+        raise HTTPException(status_code=502, detail="LLM returned no reviews.")
+    return {"reviews": reviews}
+
+
 @app.get("/health")
 def health():
     """Liveness probe: confirms the app is up and the model is loaded."""
@@ -106,10 +193,10 @@ def analyze(req: AnalyzeRequest):
                    f"{MAX_REVIEW_CHARS} chars (max per review).",
         )
 
-    # ML part: predict class + calibrated probabilities for every review
-    labels = model.predict(texts)
+    # ML part: one forward pass -> probabilities, then the argmax class
     proba = model.predict_proba(texts)
     classes = list(model.classes_)
+    labels = [classes[int(p.index(max(p)))] for p in proba]
 
     results = []
     for text, label, p in zip(texts, labels, proba):
@@ -172,8 +259,12 @@ def index():
  .row{display:flex;align-items:center;gap:14px;margin-top:14px;flex-wrap:wrap}
  button#go{padding:11px 26px;font-size:15px;font-weight:600;border:0;border-radius:10px;cursor:pointer;
            background:linear-gradient(120deg,var(--acc),var(--acc2));color:#fff;box-shadow:0 4px 14px rgba(79,70,229,.3)}
- button#go:disabled{opacity:.55;cursor:default}
- .count{font-size:13px;color:var(--muted)}
+  button#go:disabled{opacity:.55;cursor:default}
+  button#gen{padding:11px 20px;font-size:14px;font-weight:600;border:1.5px solid var(--acc);border-radius:10px;
+             cursor:pointer;background:#fff;color:var(--acc);transition:.15s}
+  button#gen:hover{background:#eef0ff}
+  button#gen:disabled{opacity:.55;cursor:default}
+  .count{font-size:13px;color:var(--muted)}
  #status{font-size:13.5px;color:var(--muted);min-height:18px}
  .spinner{display:inline-block;width:14px;height:14px;border:2px solid #c7cbe0;border-top-color:var(--acc);
           border-radius:50%;animation:spin .8s linear infinite;vertical-align:-2px;margin-right:6px}
@@ -181,9 +272,11 @@ def index():
  .summary{display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap}
  .stat{flex:1;min-width:120px;background:var(--card);border:1px solid var(--line);border-radius:12px;
        padding:14px 16px;text-align:center;box-shadow:0 1px 3px rgba(20,20,43,.06)}
- .stat .n{font-size:26px;font-weight:700}
- .stat .l{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
- .stat.neg .n{color:var(--neg)}.stat.neu .n{color:#d4a90a}.stat.pos .n{color:var(--pos)}
+  .stat .n{font-size:32px;font-weight:800;letter-spacing:.5px}
+  .stat .l{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
+  .stat.neg{background:#fdecea;border-color:#f5c6c0}.stat.neg .n{color:#b03a2e}
+  .stat.neu{background:#fff8e1;border-color:#f0e2a6}.stat.neu .n{color:#8a6d00}
+  .stat.pos{background:#e8f8f0;border-color:#bfe8d2}.stat.pos .n{color:#1e8449}
  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;
        margin-bottom:10px;box-shadow:0 1px 3px rgba(20,20,43,.05)}
  .tag{display:inline-block;padding:3px 11px;border-radius:999px;font-size:11.5px;font-weight:700;
@@ -215,8 +308,8 @@ def index():
 
 <div class="hero">
   <h1>Review Analyst</h1>
-  <p>ML-модель (LinearSVC + TF-IDF, F1 macro 0.74) определяет тональность отзывов,
-     а LLM (Qwen 27B) превращает негатив в готовый бизнес-отчёт с рекомендациями.</p>
+  <p>Мультиязычная ML-модель (fine-tuned DistilBERT, EN·RU·KZ, F1 macro 0.76) определяет
+     тональность отзывов, а LLM (Qwen 27B) превращает негатив в готовый бизнес-отчёт с рекомендациями.</p>
   <div class="badges"><span class="badge">ML: 3-классовая классификация</span>
        <span class="badge">AI: LLM-отчёт</span><span class="badge">FastAPI</span></div>
 </div>
@@ -232,13 +325,14 @@ def index():
   <textarea id="in" placeholder="…или вставьте отзывы вручную, по одному в строке&#10;Отличный сервис, всё понравилось!&#10;Менеджер был груб, ждать пришлось час…&#10;Нормально, без претензий"></textarea>
   <div class="row">
     <button id="go" onclick="run()">Проанализировать</button>
+    <button id="gen" onclick="genExample()" title="Сгенерировать пример отзывов через LLM (KZ / RU / EN)">🎲 Сгенерировать пример (KZ·RU·EN)</button>
     <span class="count" id="count">0 отзывов</span>
     <span id="status"></span>
   </div>
 </div>
 
 <div id="out"></div>
-<footer>Review Analyst · гибридный проект ML + AI · данные: Yelp reviews (HuggingFace)</footer>
+<footer>Review Analyst · гибридный проект ML + AI · данные: Yelp (EN) + rureviews (RU) + Kazakh reviews (KZ)</footer>
 </div>
 
 <script>
@@ -350,6 +444,23 @@ const drop=$('drop');
 ['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over');}));
 ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over');}));
 drop.addEventListener('drop',e=>addFiles(e.dataTransfer.files));
+
+/* ---------- generate example ---------- */
+async function genExample(){
+  const btn=$('gen');btn.disabled=true;
+  $('status').innerHTML='<span class="spinner"></span>Генерирую пример через LLM…';
+  try{
+    const r=await fetch('/generate-example',{method:'POST'});
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.detail||r.statusText);
+    $('in').value=d.reviews.join('\\n');
+    updateCount();
+    showStatus('Загружено '+d.reviews.length+' примеров (KZ/RU/EN). Нажмите «Проанализировать».');
+  }catch(e){
+    showStatus('Ошибка: '+e.message,true);
+  }
+  btn.disabled=false;
+}
 
 /* ---------- analyze ---------- */
 async function run(){

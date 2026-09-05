@@ -16,11 +16,15 @@ cells = [
 md("""# Review Analyst для бизнеса
 **Гибридный проект: ML + AI**
 
-- **ML часть:** классификация тональности отзывов в 3 класса (negative / neutral / positive). Baseline — Naive Bayes, улучшенные модели — Logistic Regression, XGBoost (на GPU) и LinearSVC.
+- **ML часть:** классификация тональности отзывов в 3 класса (negative / neutral / positive).
+  Классические модели (только EN): Naive Bayes, Logistic Regression, XGBoost (на GPU), LinearSVC.
+  **Рабочая модель приложения — fine-tuned мультиязычный DistilBERT (EN / RU / KZ).**
 - **AI часть:** LLM (Qwen 27B через OpenAI-совместимый API) анализирует негативные отзывы и генерирует отчёт для бизнеса: основные жалобы и рекомендации.
 - **Интерфейс:** FastAPI (`app.py`), эндпоинт `POST /analyze`.
 
-**Датасет:** [Yelp reviews](https://huggingface.co/datasets/Yelp/yelp_review_full) — 30 000 отзывов (10k на класс), случайная выборка из всех 650k записей. Звёзды 1–2 → negative, 3 → neutral, 4–5 → positive.
+**Датасеты:**
+- [Yelp reviews](https://huggingface.co/datasets/Yelp/yelp_review_full) — 30 000 EN-отзывов (10k на класс), случайная выборка из 650k. Звёзды 1–2 → negative, 3 → neutral, 4–5 → positive.
+- Мультиязычный набор для трансформера: Yelp (EN 10k) + rureviews и clapAI/MultiLingualSentiment (RU 20k) + R3iwan/entertainment-reviews-kazakh (KZ ~1k) — всего 30 859 train / 4 250 test.
 """),
 
 code("""import numpy as np
@@ -224,7 +228,87 @@ code("""joblib.dump(best, MODEL_DIR / "best_pipeline.pkl")
 joblib.dump(results.set_index("model"), MODEL_DIR / "metrics.pkl")
 print("Saved:", MODEL_DIR / "best_pipeline.pkl")"""),
 
-md("""## 5. AI-часть: LLM-отчёт по негативным отзывам
+md("""## 5. Мультиязычная модель: fine-tuned DistilBERT
+
+Классические модели выше понимают только английский: на RU/KZ-отзывах TF-IDF-модель
+даёт ~40% accuracy (случайный уровень для 3 классов). Поэтому рабочая модель приложения —
+fine-tuned мультиязычный трансформер.
+
+**Рецепт** (полный код — `scripts/finetune_multilingual.py`):
+- База: `lxyuan/distilbert-base-multilingual-cased-sentiments-student` (135M) — чекпоинт,
+  **преобученный на 3-классовой тональности**, а не обычный MLM. Это ключевой выбор:
+  с обычного `distilbert-base-multilingual-cased` модель схлопывает всё в «нейтрал»
+  на мягких описательных отзывах.
+- Голова классификатора базовой модели **сохраняется** (не переинициализируется) и
+  дообучается на месте — модель остаётся уверенной на однозначных отзывах.
+- Данные: 30 859 отзывов — Yelp (EN 10k), rureviews + clapAI/MultiLingualSentiment
+  (RU 20k: товарный + общедоменный), R3iwan/entertainment-reviews-kazakh (KZ ~1k).
+- 5 эпох, fp16, batch 16×2 (grad accum), lr 2e-5, max_length 128. ~10 мин на RTX 3050 Ti (4GB).
+
+Ниже загружаем обученную модель и оцениваем на выделенном test-наборе
+(4 250 отзывов; RU test — только общедоменные отзывы, т.к. это реальный сценарий приложения)."""),
+
+code("""import torch
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+MT_DIR = BASE_DIR / "model" / "multilingual"
+tok = AutoTokenizer.from_pretrained(str(MT_DIR))
+mt = AutoModelForSequenceClassification.from_pretrained(str(MT_DIR))
+device = "cuda" if torch.cuda.is_available() else "cpu"
+mt.to(device).eval()
+CLASSES = ["positive", "neutral", "negative"]  # порядок головы базовой модели
+print("Model loaded:", MT_DIR, "| device:", device)"""),
+
+code("""import json
+
+def load_jsonl(p):
+    return [json.loads(l) for l in open(p, encoding="utf-8")]
+
+test = load_jsonl(BASE_DIR / "data" / "processed" / "test.jsonl")
+texts = [r["text"] for r in test]
+gold = [r["label"] for r in test]
+langs = [r["lang"] for r in test]
+
+all_probs = []
+with torch.no_grad():
+    for i in range(0, len(texts), 256):
+        b = tok(texts[i:i+256], truncation=True, max_length=128, padding=True,
+                return_tensors="pt").to(device)
+        all_probs.append(torch.softmax(mt(**b).logits, dim=-1).cpu().numpy())
+probs = np.concatenate(all_probs)
+preds = probs.argmax(axis=-1)
+
+rows = []
+for lang in ("en", "ru", "kz"):
+    m = np.array([l == lang for l in langs])
+    rows.append({
+        "lang": lang, "n": int(m.sum()),
+        "acc": round(accuracy_score(np.array(gold)[m], preds[m]), 4),
+        "f1_macro": round(f1_score(np.array(gold)[m], preds[m], average="macro"), 4),
+        "roc_auc": round(roc_auc_score(np.array(gold)[m], probs[m],
+                                       multi_class="ovr", average="macro"), 4),
+    })
+rows.append({"lang": "overall", "n": len(gold),
+             "acc": round(accuracy_score(gold, preds), 4),
+             "f1_macro": round(f1_score(gold, preds, average="macro"), 4),
+             "roc_auc": round(roc_auc_score(gold, probs, multi_class="ovr",
+                                            average="macro"), 4)})
+pd.DataFrame(rows)"""),
+
+md("""**Результаты по языкам:** RU — сильнейший (F1 0.814, AUC 0.934) на честном общедоменном
+test-наборе. KZ = 1.0 завышен малой выборкой (250) и узким развлекательным доменом.
+EN — слабейший (0.685): 3-классовая задача Yelp объективно сложнее товарных отзывов.
+
+**Проверенные вручную провалы** (документируются, а не скрываются):
+- отрицание/контекст: «Персонал оперативно поменял *грязные* салфетки» (похвала) → негатив;
+- слабый позитив → нейтрал: «Prices were competitive...» → нейтрал 0.83;
+- смешанные отзывы: «Всё понравилось, но больше сюда не приду» → позитив 0.83;
+- RU food-домен: bias базовой модели («суп был вкусным» → негатив).
+
+135M-трансформер — надёжный классификатор однозначных отзывов, но не робастный
+анализатор нюансов (ирония, отрицание). Для этого нужен заметно более крупный модель."""),
+
+md("""## 6. AI-часть: LLM-отчёт по негативным отзывам
 
 LLM (локальная Qwen 27B через OpenAI-совместимый API) получает выборку негативных отзывов и пишет отчёт для бизнеса: основные жалобы и конкретные рекомендации. Тот же код используется в FastAPI-приложении (`app.py`).
 Ключ хранится в `.env` (не коммитится).
@@ -263,11 +347,12 @@ print(report)"""),
 
 md("""## Выводы
 
-- **Baseline** (Naive Bayes) дал F1 macro ≈ 0.66. Лучшая модель — **LinearSVC** с bigram-признаками — подняла его до ≈ 0.74.
-- **Важное наблюдение:** XGBoost (≈ 0.71) *проигрывает* линейным моделям (LogReg 0.73, LinearSVC 0.74) на разреженных TF-IDF-признаках. Это задокументированный результат: древовидные модели плохо работают с высокомерными разреженными текстовыми фичами.
-- Класс **neutral** (3 звезды) — самый сложный, его чаще всего путают с negative/positive. Это совпадает с литературой по 3-классовой тональности Yelp.
+- **Классические модели (EN):** baseline (Naive Bayes) дал F1 macro ≈ 0.66, лучшая — **LinearSVC** с bigram-признаками — ≈ 0.74.
+- **Важное наблюдение:** XGBoost (≈ 0.71) *проигрывает* линейным моделям (LogReg 0.73, LinearSVC 0.74) на разреженных TF-IDF-признаках: древовидные модели плохо работают с высокомерными разреженными текстовыми фичами.
+- **Рабочая модель — fine-tuned мультиязычный DistilBERT:** overall F1 0.764, RU 0.814 (общедоменный test), EN 0.685. Ключевые решения: sentiment-преобученная база (а не обычный MLM) и сохранение её головы — без этого модель схлопывалась в «нейтрал» на мягких отзывах.
+- **Честные ограничения:** модель систематически ошибается на отрицании, слабом позитиве, смешанных и ироничных отзывах; KZ — только развлекательный домен (открытых KZ бизнес-отзывов нет); KZ-метрики завышены малой выборкой.
 - **AI-часть** превращает сырые предсказания в понятный бизнес-отчёт: именно это делает проект гибридным и пригодным для реального продукта.
-- Дальше: кросс-валидация, подбор гиперпараметров (Optuna), A/B-сравнение промптов для LLM, Docker-деплой."""),
+- Дальше: больше KZ-данных (бизнес-домен), более крупная модель или синтетические данные для нюансов (ирония/отрицание), RAG по базе знаний заведения, A/B-сравнение промптов для LLM, Docker-деплой."""),
 ]
 
 nb = nbformat.v4.new_notebook()

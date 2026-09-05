@@ -101,8 +101,8 @@ add_text(s, Inches(0.7), Inches(3.0), Inches(12), Inches(3.5), [
     [("", 6, INK, False)],
     [("Решение", 22, ACC, True)],
     [("", 6, INK, False)],
-    [("ML-модель классифицирует каждый отзыв (негатив / нейтрал / позитив), ", 17, INK, False),
-     ("а LLM превращает негатив в готовый бизнес-отчёт", 17, ACC2, True),
+    [("Мультиязычная ML-модель (EN/RU/KZ) классифицирует каждый отзыв ", 17, INK, False),
+     ("(негатив / нейтрал / позитив), а LLM превращает негатив в готовый бизнес-отчёт", 17, ACC2, True),
      (" с конкретными рекомендациями.", 17, INK, False)],
 ])
 add_text(s, Inches(0.7), Inches(6.7), Inches(12), Inches(0.5),
@@ -111,13 +111,13 @@ add_text(s, Inches(0.7), Inches(6.7), Inches(12), Inches(0.5),
 # ---------------- Slide 2: Данные ----------------
 s = prs.slides.add_slide(BLANK)
 add_bg(s)
-header(s, "Данные", "Yelp reviews (HuggingFace) · 3 класса тональности")
+header(s, "Данные", "Yelp (EN) + rureviews / MultiLingualSentiment (RU) + Kazakh reviews (KZ) · 3 класса")
 # stat cards
 cards = [
-    ("30 000", "отзывов", ACC),
-    ("3", "класса", ACC2),
-    ("10 000", "на класс (баланс)", POS),
-    ("EN", "язык отзывов", MUTED),
+    ("30 859", "отзывов (train)", ACC),
+    ("3", "языка: EN · RU · KZ", ACC2),
+    ("3", "класса (баланс)", POS),
+    ("4 250", "отзывов (test)", MUTED),
 ]
 cx = Inches(0.7)
 for val, lab, col in cards:
@@ -128,33 +128,34 @@ for val, lab, col in cards:
              [[(lab, 13, MUTED, False)]], align=PP_ALIGN.CENTER)
     cx += Inches(3.05)
 add_text(s, Inches(0.7), Inches(3.9), Inches(12), Inches(3.0), [
-    [("Ключевые наблюдения из EDA", 20, ACC, True)],
+    [("Ключевые наблюдения", 20, ACC, True)],
     [("", 6, INK, False)],
-    [("•  1–2★ → негатив,  3★ → нейтрал,  4–5★ → позитив (3-классовая задача)", 16, INK, False)],
-    [("•  Длина отзывов: медиана ~130 слов, есть очень короткие и очень длинные", 16, INK, False)],
-    [("•  Классы сбалансированы → можно оптимизировать F1 macro без весов", 16, INK, False)],
-    [("•  Случайная выборка из 650k — чтобы не было кластеров по бизнесам", 16, INK, False)],
+    [("•  EN: 1–2★ → негатив, 3★ → нейтрал, 4–5★ → позитив; классы сбалансированы", 16, INK, False)],
+    [("•  RU: 90k товарных отзывов (rureviews) + общедоменные (рестораны/организации)", 16, INK, False)],
+    [("•  KZ: только 1 250 открытых отзывов (развлечения) — большие датасеты gated", 16, INK, False)],
+    [("•  RU test — только общедоменные отзывы: это реальный сценарий приложения", 16, INK, False)],
 ])
 
 # ---------------- Slide 3: Подход и модели ----------------
 s = prs.slides.add_slide(BLANK)
 add_bg(s)
-header(s, "Подход и модели", "Baseline → улучшение → сравнение")
+header(s, "Подход и модели", "Классические модели (EN) → мультиязычный трансформер (рабочая модель)")
 # pipeline
 add_rect(s, Inches(0.7), Inches(1.9), Inches(12), Inches(0.9), WHITE, line=RGBColor(0xE5, 0xE8, 0xF0))
 add_text(s, Inches(0.9), Inches(2.0), Inches(11.6), Inches(0.7),
-         [[("Текст  →  TF-IDF (биграммы)  →  Классификатор  →  вероятности по 3 классам", 16, INK, True)]],
+         [[("Текст  →  DistilBERT multilingual (fine-tuned, sentiment-база)  →  вероятности по 3 классам  →  LLM-отчёт", 16, INK, True)]],
          anchor=MSO_ANCHOR.MIDDLE)
 # metrics table
 rows = [
     ("Модель", "F1 macro", "ROC AUC", True),
-    ("Naive Bayes (униграммы, baseline)", "0.661", "0.843", False),
-    ("XGBoost (биграммы, GPU)", "0.706", "0.872", False),
-    ("Logistic Regression (биграммы)", "0.735", "0.891", False),
-    ("LinearSVC (биграммы, calibrated)", "0.744", "0.894", True),
+    ("Naive Bayes (униграммы, baseline, EN)", "0.661", "0.843", False),
+    ("XGBoost (биграммы, GPU, EN)", "0.706", "0.872", False),
+    ("Logistic Regression (биграммы, EN)", "0.735", "0.891", False),
+    ("LinearSVC (биграммы, calibrated, EN)", "0.744", "0.894", False),
+    ("DistilBERT multilingual (fine-tuned, EN/RU/KZ)", "0.764", "0.906", True),
 ]
-ty = Inches(3.1)
-row_h = Inches(0.62)
+ty = Inches(3.05)
+row_h = Inches(0.55)
 for i, (m, f1, auc, best) in enumerate(rows):
     bg = RGBColor(0xEE, 0xF0, 0xFF) if best else (WHITE if i % 2 else RGBColor(0xFB, 0xFB, 0xFE))
     add_rect(s, Inches(0.7), ty, Inches(12), row_h, bg,
@@ -166,10 +167,10 @@ for i, (m, f1, auc, best) in enumerate(rows):
     add_text(s, Inches(10.6), ty, Inches(1.8), row_h,
              [[(auc, 15, ACC if best else INK, best)]], anchor=MSO_ANCHOR.MIDDLE, align=PP_ALIGN.CENTER)
     ty += row_h
-add_text(s, Inches(0.7), Inches(6.5), Inches(12), Inches(0.8), [
+add_text(s, Inches(0.7), Inches(6.45), Inches(12), Inches(0.9), [
     [("Вывод: ", 15, ACC, True),
-     ("на разреженных TF-IDF линейные модели обгоняют градиентный бустинг — ", 15, INK, False),
-     ("XGBoost переобучается на высокоразмерных бинарных признаках.", 15, INK, False)],
+     ("TF-IDF-модели не понимают RU/KZ (~40% — случайный уровень), поэтому рабочая модель — ", 15, INK, False),
+     ("fine-tuned трансформер: RU F1 0.814, overall 0.764.", 15, INK, True)],
 ])
 
 # ---------------- Slide 4: Демо / интерфейс ----------------
@@ -199,19 +200,19 @@ header(s, "Выводы и что дальше")
 add_text(s, Inches(0.7), Inches(1.7), Inches(12), Inches(5.2), [
     [("Что получилось", 20, ACC, True)],
     [("", 5, INK, False)],
-    [("•  Рабочая модель: F1 macro 0.744, ROC AUC 0.894 (лучшая из 4)", 16, INK, False)],
-    [("•  Гибридный продукт: ML-классификация + LLM-отчёт на русском", 16, INK, False)],
-    [("•  Веб-интерфейс с загрузкой файлов и валидацией", 16, INK, False)],
+    [("•  Рабочая модель: fine-tuned мультиязычный DistilBERT — F1 0.764 overall, RU 0.814", 16, INK, False)],
+    [("•  Гибридный продукт: ML-классификация (EN/RU/KZ) + LLM-отчёт на русском", 16, INK, False)],
+    [("•  Веб-интерфейс: файлы, ручной ввод, генерация примера через LLM", 16, INK, False)],
     [("", 8, INK, False)],
     [("Что было сложно", 20, ACC, True)],
     [("", 5, INK, False)],
+    [("•  Обычный MLM-трансформер схлопывал всё в «нейтрал» — спасла sentiment-база + её голова", 16, INK, False)],
     [("•  LLM — thinking-модель: без отключения «размышлений» content приходит пустым", 16, INK, False)],
-    [("•  XGBoost на GPU: пришлось обёртывать метки (int) и подбирать параметры", 16, INK, False)],
+    [("•  KZ: открытых бизнес-отзывов нет — только 1 250 (развлечения), метрики завышены", 16, INK, False)],
     [("", 8, INK, False)],
     [("Что улучшил бы при большем времени", 20, ACC, True)],
     [("", 5, INK, False)],
-    [("•  Обучить модель на русскоязычных отзывах (сейчас ML — только EN)", 16, INK, False)],
-    [("•  Fine-tuning небольшой трансформер для более высокой точности", 16, INK, False)],
+    [("•  Больше KZ-данных (бизнес-домен) и более крупная модель для нюансов (ирония, отрицание)", 16, INK, False)],
     [("•  RAG: LLM ссылалась бы на базу знаний о заведении", 16, INK, False)],
 ])
 
