@@ -1,0 +1,10 @@
+.env
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+catboost_info/
+data/raw/*.csv
+data/processed/*
+!data/processed/.gitkeep
+server.log
+server_err.log
