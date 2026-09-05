@@ -4,6 +4,10 @@
 (негатив / нейтрал / позитив) с помощью ML-модели и генерирует бизнес-отчёт
 на естественном языке с помощью LLM.
 
+| Интерфейс | Результат: ML-классификация + LLM-отчёт |
+|---|---|
+| ![UI](screenshots/ui.png) | ![Demo](screenshots/demo.png) |
+
 ## Что делает
 
 1. **ML-классификатор** — линейная модель (LinearSVC) поверх TF-IDF (биграммы)
@@ -30,6 +34,11 @@ review_analyst/
 ├── model/
 │   ├── best_pipeline.pkl     # обученный пайплайн (LinearSVC)
 │   └── metrics.pkl           # таблица метрик
+├── screenshots/
+│   ├── ui.png                # скриншот интерфейса
+│   └── demo.png              # скриншот результата
+├── presentation/
+│   └── presentation.pptx     # 5-минутная презентация
 └── scripts/
     ├── download_data.py      # загрузка/подготовка датасета
     ├── build_notebook.py     # генерация ноутбука

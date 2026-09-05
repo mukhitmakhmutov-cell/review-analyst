@@ -30,6 +30,7 @@ llm_client = None
 
 @app.on_event("startup")
 def _load():
+    """Load the trained ML pipeline and the LLM client once at startup."""
     global model, llm_client
     if not MODEL_PATH.exists():
         raise RuntimeError(f"Model not found at {MODEL_PATH}. Run notebooks/analysis.ipynb first.")
@@ -48,6 +49,12 @@ class AnalyzeRequest(BaseModel):
 
 
 def _llm_report(negative_reviews: list[str], max_reviews: int = 15) -> str:
+    """Ask the LLM to turn negative reviews into a Russian business report.
+
+    The model is a *thinking* model, so we must disable thinking
+    (``enable_thinking: False``) and give a generous ``max_tokens`` —
+    otherwise the tokens go to ``reasoning_content`` and ``content`` comes back empty.
+    """
     sample = "\n\n".join(f"[{i+1}] {t[:600]}" for i, t in enumerate(negative_reviews[:max_reviews]))
     prompt = (
         "Ты — аналитик для бизнеса. Ниже приведены негативные отзывы клиентов. "
@@ -70,11 +77,17 @@ def _llm_report(negative_reviews: list[str], max_reviews: int = 15) -> str:
 
 @app.get("/health")
 def health():
+    """Liveness probe: confirms the app is up and the model is loaded."""
     return {"status": "ok", "model_loaded": model is not None}
 
 
 @app.post("/analyze")
 def analyze(req: AnalyzeRequest):
+    """Classify reviews with the ML model and (optionally) build an LLM report.
+
+    Returns per-review sentiment + probabilities, a class summary, and the
+    Markdown LLM report generated from the negative reviews.
+    """
     texts = [r.strip() for r in req.reviews if r.strip()]
     if not texts:
         raise HTTPException(status_code=422, detail="No non-empty reviews provided.")
@@ -93,6 +106,7 @@ def analyze(req: AnalyzeRequest):
                    f"{MAX_REVIEW_CHARS} chars (max per review).",
         )
 
+    # ML part: predict class + calibrated probabilities for every review
     labels = model.predict(texts)
     proba = model.predict_proba(texts)
     classes = list(model.classes_)
@@ -105,9 +119,11 @@ def analyze(req: AnalyzeRequest):
             "probabilities": {str(c): round(float(pc), 4) for c, pc in zip(classes, p)},
         })
 
+    # class counts + the negative subset that feeds the LLM
     summary = {c: int(sum(1 for r in results if r["sentiment"] == c)) for c in classes}
     negative = [r["review"] for r in results if r["sentiment"] == "negative"]
 
+    # AI part: only run the LLM if there is something negative to report on
     report = None
     if req.generate_report and negative:
         try:
@@ -120,6 +136,7 @@ def analyze(req: AnalyzeRequest):
 
 @app.get("/", response_class=HTMLResponse)
 def index():
+    """Serve the single-page web UI (HTML/CSS/JS inlined, no build step)."""
     return """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
